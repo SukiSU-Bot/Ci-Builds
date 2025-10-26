@@ -25,7 +25,7 @@ jobs:
 
       - name: Install Android NDK r29
         run: |
-          sdkmanager --install "ndk;29.0.12682434"
+          sdkmanager --install "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.12682434" >> $GITHUB_ENV
           
       - name: Install dependencies
