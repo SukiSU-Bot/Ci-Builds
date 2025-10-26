@@ -26,7 +26,8 @@ jobs:
       - name: Install Android NDK r29
         run: |
           sdkmanager --install "ndk;29.0.14206865"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.12682434" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> $GITHUB_ENV
           
       - name: Install dependencies
         run: |
@@ -47,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openssl-build-${{ matrix.abi }}
-          key: openssl-${{ matrix.abi }}-${{ matrix.api_level }}-v1
+          key: openssl-${{ matrix.abi }}-${{ matrix.api_level }}-v2
 
       - name: Build OpenSSL
         if: steps.cache-openssl.outputs.cache-hit != 'true'
@@ -58,18 +59,23 @@ jobs:
           case "${{ matrix.abi }}" in
             armeabi-v7a)
               OPENSSL_TARGET="android-arm"
+              ANDROID_ARCH="armv7a-linux-androideabi"
               ;;
             arm64-v8a)
               OPENSSL_TARGET="android-arm64"
+              ANDROID_ARCH="aarch64-linux-android"
               ;;
             x86)
               OPENSSL_TARGET="android-x86"
+              ANDROID_ARCH="i686-linux-android"
               ;;
             x86_64)
               OPENSSL_TARGET="android-x86_64"
+              ANDROID_ARCH="x86_64-linux-android"
               ;;
           esac
           
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
           export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           
           ./Configure $OPENSSL_TARGET \
@@ -132,24 +138,20 @@ jobs:
 
       - name: Build cURL
         run: |
-          git clone --depth 1 https://github.com/curl/curl.git
+          git clone --depth 1 --branch curl-8_11_0 https://github.com/curl/curl.git
           cd curl
           
           case "${{ matrix.abi }}" in
             armeabi-v7a)
-              ARCH="armv7a-linux-androideabi"
               CMAKE_ARCH="armeabi-v7a"
               ;;
             arm64-v8a)
-              ARCH="aarch64-linux-android"
               CMAKE_ARCH="arm64-v8a"
               ;;
             x86)
-              ARCH="i686-linux-android"
               CMAKE_ARCH="x86"
               ;;
             x86_64)
-              ARCH="x86_64-linux-android"
               CMAKE_ARCH="x86_64"
               ;;
           esac
