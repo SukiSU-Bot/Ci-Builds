@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 120
 
     steps:
@@ -26,10 +26,10 @@ jobs:
 
       - name: Install Zig (latest)
         run: |
-          ZIG_VERSION="0.15.1"
-          curl -LO "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
-          tar -xf "zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
-          sudo mv "zig-linux-x86_64-${ZIG_VERSION}" /usr/local/zig
+          ZIG_VERSION="0.15.2"
+          curl -LO "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz"
+          tar -xf "zig-linux-x86_64-0.15.2.tar.xz"
+          sudo mv "zig-linux-x86_64-0.15.2" /usr/local/zig
           sudo ln -s /usr/local/zig/zig /usr/local/bin/zig
           zig version
 
