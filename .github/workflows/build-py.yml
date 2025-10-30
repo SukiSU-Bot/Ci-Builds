@@ -1,79 +1,189 @@
-name: Build Python for Android
+name: Generate Android Keystore
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
-      - develop
   workflow_dispatch:
-
-env:
-  PYTHON_VERSION: '3.14'
-  BUILDOZER_VERSION: 'stable'
+    inputs:
+      app_name:
+        description: 'App name for keystore alias'
+        required: true
+        default: 'myapp'
+      validity_days:
+        description: 'Keystore validity in days'
+        required: true
+        default: '10000'
 
 jobs:
-  build-android:
-    name: Build Android APK/AAB
+  generate-keystore:
     runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        arch: [armeabi-v7a, arm64-v8a]
-        build-type: [debug, release]
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          path: master
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          architecture: x64
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Cache Buildozer global directory
-        uses: actions/cache@v4
-        with:
-          path: .buildozer_global
-          key: buildozer-global-${{ runner.os }}-${{ hashFiles('**/buildozer.spec') }}
-          restore-keys: |
-            buildozer-global-${{ runner.os }}-
-
-      - name: Install dependencies
+      - name: Generate random passwords
+        id: passwords
         run: |
-          python -m pip install --upgrade pip
-          pip install --upgrade Cython==3.1.6
-          pip install --upgrade setuptools wheel
+          STORE_PASSWORD=$(openssl rand -base64 24)
+          KEY_PASSWORD=$(openssl rand -base64 24)
+          echo "::add-mask::$STORE_PASSWORD"
+          echo "::add-mask::$KEY_PASSWORD"
+          echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_OUTPUT
+          echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_OUTPUT
+          echo "KEYSTORE_FILE=${{ github.event.inputs.app_name }}-keystore.jks" >> $GITHUB_OUTPUT
+          echo "KEY_ALIAS=${{ github.event.inputs.app_name }}-key" >> $GITHUB_OUTPUT
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        env:
-          APP_ANDROID_ARCH: ${{ matrix.arch }}
-        with:
-          repository_root: master
-          workdir: .
-          buildozer_version: ${{ env.BUILDOZER_VERSION }}
-          command: buildozer android ${{ matrix.build-type }}
+      - name: Generate keystore
+        run: |
+          keytool -genkey -v \
+            -keystore ${{ steps.passwords.outputs.KEYSTORE_FILE }} \
+            -alias ${{ steps.passwords.outputs.KEY_ALIAS }} \
+            -keyalg RSA \
+            -sigalg SHA256withRSA \
+            -keysize 2048 \
+            -validity ${{ github.event.inputs.validity_days }} \
+            -storepass "${{ steps.passwords.outputs.STORE_PASSWORD }}" \
+            -keypass "${{ steps.passwords.outputs.KEY_PASSWORD }}" \
+            -dname "CN=${{ github.event.inputs.app_name }}, OU=Development, O=${{ github.repository_owner }}, L=Unknown, ST=Unknown, C=US"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: python-android-${{ matrix.arch }}-${{ matrix.build-type }}
-          path: ${{ steps.buildozer.outputs.filename }}
-          retention-days: 30
+      - name: Encode keystore to Base64
+        id: encode
+        run: |
+          BASE64_KEYSTORE=$(openssl base64 -in ${{ steps.passwords.outputs.KEYSTORE_FILE }} | tr -d '
+')
+          echo "::add-mask::$BASE64_KEYSTORE"
+          echo "BASE64_KEYSTORE=$BASE64_KEYSTORE" >> $GITHUB_OUTPUT
 
-      - name: Upload to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Get keystore info
+        id: keystore_info
+        run: |
+          echo "KEYSTORE_SIZE=$(ls -lh ${{ steps.passwords.outputs.KEYSTORE_FILE }} | awk '{print $5}')" >> $GITHUB_OUTPUT
+          echo "CREATION_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          keytool -list -v -keystore ${{ steps.passwords.outputs.KEYSTORE_FILE }} \
+            -storepass "${{ steps.passwords.outputs.STORE_PASSWORD }}" > keystore-details.txt
+
+      - name: Create credentials file
+        run: |
+          cat <<EOF > keystore-credentials.txt
+          ==========================================
+          ANDROID KEYSTORE CREDENTIALS
+          ==========================================
+          
+          Generated: ${{ steps.keystore_info.outputs.CREATION_DATE }}
+          Repository: ${{ github.repository }}
+          Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          ==========================================
+          KEYSTORE DETAILS
+          ==========================================
+          
+          File Name: ${{ steps.passwords.outputs.KEYSTORE_FILE }}
+          File Size: ${{ steps.keystore_info.outputs.KEYSTORE_SIZE }}
+          Key Alias: ${{ steps.passwords.outputs.KEY_ALIAS }}
+          Validity: ${{ github.event.inputs.validity_days }} days
+          
+          ==========================================
+          PASSWORDS (SAVE THESE SECURELY!)
+          ==========================================
+          
+          Keystore Password: ${{ steps.passwords.outputs.STORE_PASSWORD }}
+          Key Password: ${{ steps.passwords.outputs.KEY_PASSWORD }}
+          
+          ==========================================
+          BASE64 ENCODED KEYSTORE (for GitHub Secrets)
+          ==========================================
+          
+          Add this to GitHub Secrets as KEYSTORE_BASE64:
+          
+          ${{ steps.encode.outputs.BASE64_KEYSTORE }}
+          
+          ==========================================
+          GITHUB SECRETS SETUP
+          ==========================================
+          
+          Go to: ${{ github.server_url }}/${{ github.repository }}/settings/secrets/actions
+          
+          Create these secrets:
+          - KEYSTORE_BASE64: (paste base64 string above)
+          - KEYSTORE_PASSWORD: ${{ steps.passwords.outputs.STORE_PASSWORD }}
+          - KEY_PASSWORD: ${{ steps.passwords.outputs.KEY_PASSWORD }}
+          - KEY_ALIAS: ${{ steps.passwords.outputs.KEY_ALIAS }}
+          
+          ==========================================
+          EOF
+
+      - name: Upload keystore file
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ steps.buildozer.outputs.filename }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: keystore-bundle
+          path: |
+            ${{ steps.passwords.outputs.KEYSTORE_FILE }}
+            keystore-credentials.txt
+            keystore-details.txt
+          retention-days: 7
+
+      - name: Send email with keystore details
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "🔐 Android Keystore Generated - ${{ github.event.inputs.app_name }}"
+          to: ${{ secrets.RECIPIENT_EMAIL }}
+          from: GitHub Actions <${{ secrets.MAIL_USERNAME }}>
+          html_body: |
+            <h2>Android Keystore Successfully Generated</h2>
+            <p><strong>Repository:</strong> ${{ github.repository }}</p>
+            <p><strong>Generated:</strong> ${{ steps.keystore_info.outputs.CREATION_DATE }}</p>
+            
+            <h3>📋 Keystore Information</h3>
+            <ul>
+              <li><strong>File Name:</strong> ${{ steps.passwords.outputs.KEYSTORE_FILE }}</li>
+              <li><strong>File Size:</strong> ${{ steps.keystore_info.outputs.KEYSTORE_SIZE }}</li>
+              <li><strong>Key Alias:</strong> ${{ steps.passwords.outputs.KEY_ALIAS }}</li>
+              <li><strong>Validity:</strong> ${{ github.event.inputs.validity_days }} days</li>
+            </ul>
+            
+            <h3>🔑 Credentials (Save Securely!)</h3>
+            <ul>
+              <li><strong>Keystore Password:</strong> <code>${{ steps.passwords.outputs.STORE_PASSWORD }}</code></li>
+              <li><strong>Key Password:</strong> <code>${{ steps.passwords.outputs.KEY_PASSWORD }}</code></li>
+            </ul>
+            
+            <h3>📦 Download Keystore</h3>
+            <p>Download the keystore bundle from the workflow artifacts:</p>
+            <p><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">View Workflow Run</a></p>
+            
+            <h3>⚙️ GitHub Secrets Setup</h3>
+            <p>Add these secrets to your repository:</p>
+            <ol>
+              <li>Go to <a href="${{ github.server_url }}/${{ github.repository }}/settings/secrets/actions">Repository Secrets</a></li>
+              <li>Create these secrets:
+                <ul>
+                  <li><code>KEYSTORE_BASE64</code> - (check credentials file in artifacts)</li>
+                  <li><code>KEYSTORE_PASSWORD</code> - ${{ steps.passwords.outputs.STORE_PASSWORD }}</li>
+                  <li><code>KEY_PASSWORD</code> - ${{ steps.passwords.outputs.KEY_PASSWORD }}</li>
+                  <li><code>KEY_ALIAS</code> - ${{ steps.passwords.outputs.KEY_ALIAS }}</li>
+                </ul>
+              </li>
+            </ol>
+            
+            <p><em>⚠️ This keystore will be available in artifacts for 7 days. Download and store it securely!</em></p>
+          attachments: keystore-credentials.txt
+
+      - name: Summary
+        run: |
+          echo "### ✅ Keystore Generated Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**File:** ${{ steps.passwords.outputs.KEYSTORE_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Alias:** ${{ steps.passwords.outputs.KEY_ALIAS }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Validity:** ${{ github.event.inputs.validity_days }} days" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📧 Email sent with credentials to configured recipient" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Keystore available in workflow artifacts (7 days retention)" >> $GITHUB_STEP_SUMMARY
