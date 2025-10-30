@@ -37,7 +37,7 @@ jobs:
 
       - name: Configure Node.js for Android ARM64
         run: |
-          ./android-configure $ANDROID_NDK_HOME 30 arm64
+          ./android-configure $ANDROID_NDK_HOME 36 arm64
 
       - name: Build Node.js
         run: |
