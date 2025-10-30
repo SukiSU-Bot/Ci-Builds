@@ -54,7 +54,7 @@ jobs:
       - name: Encode keystore to Base64
         id: encode
         run: |
-          BASE64_KEYSTORE=$(openssl base64 -in ${{ steps.passwords.outputs.KEYSTORE_FILE }} | tr -d)
+          BASE64_KEYSTORE=$(openssl base64 -in ${{ steps.passwords.outputs.KEYSTORE_FILE }} | tr -d '\n')
           echo "::add-mask::$BASE64_KEYSTORE"
           echo "BASE64_KEYSTORE=$BASE64_KEYSTORE" >> $GITHUB_OUTPUT
 
