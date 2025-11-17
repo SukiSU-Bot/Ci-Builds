@@ -1,0 +1,56 @@
+name: Initialize Shadcn React Application
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/init-shadcn.yml
+
+permissions:
+  contents: write
+
+jobs:
+  initialize:
+    name: Setup React with Shadcn UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Bun runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      
+      - name: Initialize project
+        run: bun init --react=shadcn
+        continue-on-error: true
+      
+      - name: Detect changes
+        id: changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "detected=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Configure Git
+        if: steps.changes.outputs.detected == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      
+      - name: Commit changes
+        if: steps.changes.outputs.detected == 'true'
+        run: |
+          git add .
+          git commit -m "Initialize React application with Shadcn UI"
+          git push
